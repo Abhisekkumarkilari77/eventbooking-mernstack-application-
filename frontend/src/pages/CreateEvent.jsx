@@ -20,6 +20,7 @@ const CreateEvent = () => {
     venueId: '',
     startDate: '',
     endDate: '',
+    bannerImage: '',
     status: 'published'
   });
 
@@ -37,9 +38,33 @@ const CreateEvent = () => {
     });
   }, [user, navigate]);
 
+  const [showVenueModal, setShowVenueModal] = useState(false);
+  const [newVenue, setNewVenue] = useState({
+    name: '', address: '', city: '', state: '', capacity: 100
+  });
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleVenueChange = (e) => {
+    const { name, value } = e.target;
+    setNewVenue(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleAddVenue = async (e) => {
+    e.preventDefault();
+    try {
+      const { data } = await venueAPI.create(newVenue);
+      setVenues(prev => [...prev, data.venue]);
+      setForm(prev => ({ ...prev, venueId: data.venue._id }));
+      setShowVenueModal(false);
+      setNewVenue({ name: '', address: '', city: '', state: '', capacity: 100 });
+      toast.success('Venue added successfully! 🎉');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to add venue');
+    }
   };
 
   const handleSectionChange = (index, field, value) => {
@@ -67,6 +92,7 @@ const CreateEvent = () => {
 
       const payload = {
         ...form,
+        bannerImages: form.bannerImage ? [form.bannerImage] : [],
         totalSeats,
         ticketPriceRange: { min: minPrice, max: maxPrice },
         sections
@@ -115,10 +141,19 @@ const CreateEvent = () => {
                   </div>
                   <div className="input-group">
                     <label>Venue</label>
-                    <select name="venueId" className="input-field" value={form.venueId} onChange={handleChange} required>
-                      {venues.map(v => <option key={v._id} value={v._id}>{v.name} ({v.city})</option>)}
-                    </select>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <select name="venueId" className="input-field" value={form.venueId} onChange={handleChange} required style={{ flex: 1 }}>
+                        <option value="">Select Venue</option>
+                        {venues.map(v => <option key={v._id} value={v._id}>{v.name} ({v.city})</option>)}
+                      </select>
+                      <button type="button" onClick={() => setShowVenueModal(true)} className="btn btn-secondary" style={{ padding: '0 12px' }}>+</button>
+                    </div>
                   </div>
+                </div>
+
+                <div className="input-group">
+                  <label>Banner Image URL</label>
+                  <input type="text" name="bannerImage" className="input-field" value={form.bannerImage} onChange={handleChange} placeholder="https://images.unsplash.com/..." />
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -172,6 +207,46 @@ const CreateEvent = () => {
             </div>
           </div>
         </form>
+
+        {/* Quick Add Venue Modal */}
+        {showVenueModal && (
+          <div style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20
+          }}>
+            <div className="glass-card" style={{ width: '100%', maxWidth: 450, padding: 32 }}>
+              <h2 style={{ fontFamily: 'Outfit', fontWeight: 800, marginBottom: 24 }}>🏢 Add New Venue</h2>
+              <form onSubmit={handleAddVenue} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div className="input-group">
+                  <label>Venue Name</label>
+                  <input type="text" name="name" className="input-field" value={newVenue.name} onChange={handleVenueChange} required />
+                </div>
+                <div className="input-group">
+                  <label>Address</label>
+                  <input type="text" name="address" className="input-field" value={newVenue.address} onChange={handleVenueChange} required />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div className="input-group">
+                    <label>City</label>
+                    <input type="text" name="city" className="input-field" value={newVenue.city} onChange={handleVenueChange} required />
+                  </div>
+                  <div className="input-group">
+                    <label>State</label>
+                    <input type="text" name="state" className="input-field" value={newVenue.state} onChange={handleVenueChange} required />
+                  </div>
+                </div>
+                <div className="input-group">
+                  <label>Capacity</label>
+                  <input type="number" name="capacity" className="input-field" value={newVenue.capacity} onChange={handleVenueChange} required />
+                </div>
+                <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+                  <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Save Venue</button>
+                  <button type="button" onClick={() => setShowVenueModal(false)} className="btn btn-secondary" style={{ flex: 1 }}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

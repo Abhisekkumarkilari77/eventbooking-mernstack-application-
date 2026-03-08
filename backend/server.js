@@ -60,29 +60,29 @@ io.on('connection', (socket) => {
   });
 });
 
-// Security middleware
+// Security & Global middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200,
-  message: { success: false, message: 'Too many requests, please try again later' }
-});
-app.use('/api/', limiter);
+// CORS - Must be before routes AND limiter to ensure error responses have proper headers
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  credentials: true
+}));
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// CORS
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
-  credentials: true
-}));
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 2000, // Increased for development
+  message: { success: false, message: 'Too many requests, please try again later' }
+});
+app.use('/api/', limiter);
 
 // Logging
 if (process.env.NODE_ENV === 'development') {

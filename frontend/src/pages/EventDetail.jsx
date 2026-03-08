@@ -49,22 +49,13 @@ const EventDetail = () => {
 
     setBooking(true);
     try {
-      // Step 1: Reserve seats
-      const { data: reserveData } = await bookingAPI.reserve({
+      await bookingAPI.bookNow({
         eventId: event._id,
         seatIds: selectedSeats.map(s => s._id)
       });
 
-      toast.success(`${selectedSeats.length} seat(s) reserved! Completing payment...`);
-
-      // Step 2: Simulate payment and confirm
-      const { data: confirmData } = await bookingAPI.confirm({
-        bookingId: reserveData.booking._id,
-        paymentMethod: 'simulated'
-      });
-
-      toast.success('🎉 Booking confirmed! Tickets generated.');
-      navigate(`/my-bookings`);
+      toast.success(`🎉 Booking confirmed! ${selectedSeats.length} ticket(s) added to My Tickets.`);
+      navigate('/my-tickets');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Booking failed. Please try again.');
     } finally {
@@ -363,7 +354,7 @@ const EventDetail = () => {
                   </>
                 ) : (
                   <>
-                    <IoWallet /> {selectedSeats.length > 0 ? `Pay ₹${totalPrice.toLocaleString('en-IN')}` : 'Select Seats'}
+                    <IoWallet /> {selectedSeats.length > 0 ? `Book Now — ₹${totalPrice.toLocaleString('en-IN')}` : 'Select Seats'}
                   </>
                 )}
               </button>

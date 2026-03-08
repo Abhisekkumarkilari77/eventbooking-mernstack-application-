@@ -48,11 +48,10 @@ bookingSchema.index({ bookingStatus: 1 });
 // Removed duplicate unique index declaration
 
 // Generate booking number before saving
-bookingSchema.pre('save', function(next) {
+bookingSchema.pre('save', async function() {
   if (!this.bookingNumber) {
     this.bookingNumber = 'BK-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6).toUpperCase();
   }
-  next();
 });
 
 module.exports = mongoose.model('Booking', bookingSchema);

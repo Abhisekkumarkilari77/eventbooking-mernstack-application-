@@ -51,11 +51,10 @@ const paymentSchema = new mongoose.Schema({
 paymentSchema.index({ bookingId: 1 });
 
 // Generate transaction ID
-paymentSchema.pre('save', function(next) {
+paymentSchema.pre('save', async function() {
   if (!this.transactionId) {
     this.transactionId = 'TXN-' + Date.now() + '-' + Math.random().toString(36).substr(2, 8).toUpperCase();
   }
-  next();
 });
 
 module.exports = mongoose.model('Payment', paymentSchema);

@@ -52,11 +52,10 @@ ticketSchema.index({ userId: 1 });
 ticketSchema.index({ bookingId: 1 });
 
 // Generate ticket number
-ticketSchema.pre('save', function(next) {
+ticketSchema.pre('save', async function() {
   if (!this.ticketNumber) {
     this.ticketNumber = 'TK-' + Date.now() + '-' + Math.random().toString(36).substr(2, 8).toUpperCase();
   }
-  next();
 });
 
 module.exports = mongoose.model('Ticket', ticketSchema);

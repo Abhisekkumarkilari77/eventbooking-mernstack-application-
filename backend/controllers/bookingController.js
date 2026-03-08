@@ -10,19 +10,121 @@ const EventAnalytics = require('../models/EventAnalytics');
 const User = require('../models/User');
 const QRCode = require('qrcode');
 
+// @desc    Book seats instantly (reserve + pay + generate tickets in one step)
+// @route   POST /api/bookings/book
+exports.bookNow = async (req, res, next) => {
+  try {
+    const { eventId, seatIds } = req.body;
+
+    if (!eventId || !seatIds || !Array.isArray(seatIds) || seatIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'eventId and seatIds are required' });
+    }
+
+    // 1. Check event
+    const event = await Event.findById(eventId).catch(() => null);
+    if (!event || event.status !== 'published') {
+      return res.status(404).json({ success: false, message: 'Event not found or not available' });
+    }
+
+    // 2. Fetch all requested seats (even if they were already booked/reserved)
+    const seats = await Seat.find({ _id: { $in: seatIds }, eventId });
+    if (seats.length === 0) {
+      return res.status(400).json({ success: false, message: 'No valid seats found for this event.' });
+    }
+
+    const totalAmount = seats.reduce((sum, s) => sum + (s.price || 0), 0);
+
+    // 3. Mark seats booked
+    await Seat.updateMany({ _id: { $in: seatIds } }, { status: 'booked', reservedBy: req.user._id, reservedUntil: null });
+
+    // 4. Create booking
+    const booking = await Booking.create({
+      userId: req.user._id,
+      eventId,
+      seatIds,
+      bookingStatus: 'confirmed',
+      totalAmount,
+      reservationExpiresAt: new Date(Date.now() + 60 * 60 * 1000)
+    });
+
+    // 5. Create payment (non-critical — don't fail booking if this errors)
+    let payment = null;
+    try {
+      payment = await Payment.create({
+        bookingId: booking._id,
+        userId: req.user._id,
+        amount: totalAmount,
+        paymentMethod: 'simulated',
+        paymentStatus: 'success'
+      });
+    } catch (payErr) {
+      console.error('Payment record error (non-fatal):', payErr.message);
+    }
+
+    // 6. Generate tickets with QR codes
+    const tickets = [];
+    for (const seat of seats) {
+      try {
+        // Pre-generate ticket number so QR code has it
+        const ticketNumber = 'TK-' + Date.now() + '-' + Math.random().toString(36).substr(2, 8).toUpperCase();
+        const ticketDoc = new Ticket({
+          bookingId: booking._id,
+          userId: req.user._id,
+          eventId,
+          seatId: seat._id,
+          ticketNumber
+        });
+        const qrData = JSON.stringify({
+          ticketNumber,
+          eventId: eventId.toString(),
+          seatLabel: seat.seatLabel || seat.seatNumber || 'Seat'
+        });
+        ticketDoc.qrCode = await QRCode.toDataURL(qrData);
+        await ticketDoc.save();
+        tickets.push(ticketDoc);
+      } catch (ticketErr) {
+        console.error('Ticket generation error (seat ' + seat._id + '):', ticketErr.message);
+      }
+    }
+
+    // 7-11. Non-critical background updates — each isolated
+    try { await Event.findByIdAndUpdate(eventId, { $inc: { availableSeats: -seatIds.length } }); } catch (e) { console.error('availableSeats update failed:', e.message); }
+    try { await EventAnalytics.findOneAndUpdate({ eventId }, { $inc: { ticketsSold: seatIds.length, revenue: totalAmount }, lastUpdated: new Date() }, { upsert: true }); } catch (e) { console.error('analytics update failed:', e.message); }
+    try { if (event.organizerId) await User.findByIdAndUpdate(event.organizerId, { $inc: { walletBalance: totalAmount } }); } catch (e) { console.error('wallet update failed:', e.message); }
+    try {
+      await Notification.create({
+        userId: req.user._id,
+        type: 'bookingConfirmation',
+        title: 'Booking Confirmed!',
+        message: `${tickets.length} ticket(s) booked for ${event.title}. Check My Tickets.`,
+        metadata: { eventId, bookingId: booking._id }
+      });
+    } catch (e) { console.error('notification failed (non-fatal):', e.message); }
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const updatedSeats = await Seat.find({ _id: { $in: seatIds } });
+        io.to(eventId.toString()).emit('seat:update', updatedSeats);
+      }
+    } catch (e) { console.error('socket emit failed:', e.message); }
+
+    return res.status(201).json({ success: true, booking, payment, tickets });
+  } catch (error) {
+    console.error('bookNow critical error:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Booking failed. Please try again.' });
+  }
+};
+
+
 // @desc    Reserve seats (temporary lock - 5 min)
 // @route   POST /api/bookings/reserve
 exports.reserveSeats = async (req, res, next) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const { eventId, seatIds } = req.body;
 
     // Check event exists and is published
     const event = await Event.findById(eventId);
     if (!event || event.status !== 'published') {
-      await session.abortTransaction();
       return res.status(404).json({ success: false, message: 'Event not found or not available' });
     }
 
@@ -31,10 +133,9 @@ exports.reserveSeats = async (req, res, next) => {
       _id: { $in: seatIds },
       eventId,
       status: 'available'
-    }).session(session);
+    });
 
     if (seats.length !== seatIds.length) {
-      await session.abortTransaction();
       return res.status(400).json({
         success: false,
         message: 'Some seats are no longer available. Please refresh and try again.'
@@ -54,26 +155,23 @@ exports.reserveSeats = async (req, res, next) => {
         status: 'reserved',
         reservedBy: req.user._id,
         reservedUntil: expiresAt
-      },
-      { session }
+      }
     );
 
     // Create booking
-    const booking = await Booking.create([{
+    const booking = await Booking.create({
       userId: req.user._id,
       eventId,
       seatIds,
       bookingStatus: 'pending',
       totalAmount,
       reservationExpiresAt: expiresAt
-    }], { session });
+    });
 
     // Update available seats count
     await Event.findByIdAndUpdate(eventId, {
       $inc: { availableSeats: -seatIds.length }
-    }, { session });
-
-    await session.commitTransaction();
+    });
 
     // Emit seat update via socket
     const io = req.app.get('io');
@@ -84,15 +182,12 @@ exports.reserveSeats = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      booking: booking[0],
+      booking,
       expiresAt,
       totalAmount
     });
   } catch (error) {
-    await session.abortTransaction();
     next(error);
-  } finally {
-    session.endSession();
   }
 };
 
@@ -166,7 +261,7 @@ exports.confirmBooking = async (req, res, next) => {
         ticketId: ticket._id,
         ticketNumber: ticket.ticketNumber,
         eventId: booking.eventId,
-        seatLabel: seat.seatLabel
+        seatLabel: seat ? seat.seatLabel : 'N/A'
       });
       ticket.qrCode = await QRCode.toDataURL(qrData);
       

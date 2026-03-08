@@ -78,6 +78,7 @@ export const seatAPI = {
 
 // Bookings
 export const bookingAPI = {
+  bookNow: (data) => api.post('/bookings/book', data),
   reserve: (data) => api.post('/bookings/reserve', data),
   confirm: (data) => api.post('/bookings/confirm', data),
   cancel: (id, data) => api.post(`/bookings/${id}/cancel`, data),
